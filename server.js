@@ -1,74 +1,45 @@
-require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = 3000;
 
-// إعدادات أساسية
 app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-// متغيرات البيئة
-const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
+const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY || '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';
 
-// نقطة نهاية للصحة
-app.get('/', (req, res) => {
-  res.status(200).json({ 
-    status: 'running',
-    message: 'Mashaly AI Server is operational',
-    version: '1.0.0'
-  });
-});
-
-// نقطة نهاية الدردشة
 app.post('/chat', async (req, res) => {
+  const { message } = req.body;
   try {
-    const { message } = req.body;
-    
-    if (!PERPLEXITY_API_KEY) {
-      return res.status(500).json({ 
-        error: 'Server misconfiguration',
-        details: 'API key is missing'
-      });
-    }
-
     const response = await axios.post(
       'https://api.perplexity.ai/chat/completions',
       {
-        model: 'sonar-small-chat',
+        model: 'sonar-pro',
         messages: [
-          { role: 'system', content: 'You are a helpful AI assistant.' },
+          { role: 'system', content: 'Be precise and concise in your responses.' },
           { role: 'user', content: message }
         ],
-        max_tokens: 1000,
+        max_tokens: 1024,
         temperature: 0.7
       },
       {
         headers: {
           'Authorization': `Bearer ${PERPLEXITY_API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        timeout: 10000
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
       }
     );
-
-    res.json({ response: response.data.choices[0].message.content });
+    const botResponse = response.data.choices[0].message.content;
+    res.json({ response: botResponse });
   } catch (error) {
-    console.error('API Error:', error.message);
-    res.status(500).json({ 
-      error: 'Failed to process request',
-      details: error.message
-    });
+    console.error('Error:', error.response ? error.response.data : error.message);
+    res.status(500).json({ error: 'Failed to get response from Perplexity API' });
   }
 });
 
-// بدء السيرفر
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-  if (!PERPLEXITY_API_KEY) {
-    console.warn('Warning: PERPLEXITY_API_KEY is not set!');
-  }
+  console.log(`Server running at http://localhost:${port}`);
 });
