@@ -1,50 +1,44 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const multer = require('multer');
 const fs = require('fs');
+const path = require('path');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = 3000;
+const upload = multer({ dest: 'uploads/' });
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// تعيين مفتاح API
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY || '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';
 
-// تهيئة الذاكرة
-const MEMORY_FILE = 'memory.json';
-let memory = {};
-if (fs.existsSync(MEMORY_FILE)) {
-    memory = JSON.parse(fs.readFileSync(MEMORY_FILE));
-} else {
-    fs.writeFileSync(MEMORY_FILE, JSON.stringify({}, null, 2));
-}
-
-// حفظ الذاكرة
-const saveMemory = () => {
-    fs.writeFileSync(MEMORY_FILE, JSON.stringify(memory, null, 2));
-};
-
-app.post('/chat', async (req, res) => {
+app.post('/chat', upload.single('file'), async (req, res) => {
     const { message } = req.body;
-
-    if (!message) {
-        return res.status(400).json({ error: 'No message provided' });
-    }
+    const file = req.file;
 
     try {
-        // تخزين السؤال في الذاكرة
-        memory[message] = memory[message] || { count: 0, response: null };
-        memory[message].count += 1;
+        let prompt = message || "Analyze the attached file";
+        
+        // If file is uploaded, read its content
+        if (file) {
+            const filePath = path.join(__dirname, file.path);
+            const fileContent = fs.readFileSync(filePath, 'utf-8');
+            prompt += `\n\nFile Content (${file.originalname}):\n${fileContent}`;
+            
+            // Clean up the file after reading
+            fs.unlinkSync(filePath);
+        }
 
         const response = await axios.post(
             'https://api.perplexity.ai/chat/completions',
             {
                 model: 'sonar-pro',
                 messages: [
-                    { role: 'system', content: 'Be precise and concise. Provide a direct answer unless "explain" or "شرح" is requested, then give a detailed response with bullet points.' },
-                    { role: 'user', content: message }
+                    { role: 'system', content: 'Be precise and concise in your responses. Analyze any provided files carefully.' },
+                    { role: 'user', content: prompt }
                 ],
                 max_tokens: 1024,
                 temperature: 0.7
@@ -57,11 +51,8 @@ app.post('/chat', async (req, res) => {
                 }
             }
         );
-
+        
         const botResponse = response.data.choices[0].message.content;
-        memory[message].response = botResponse; // حفظ الإجابة
-        saveMemory(); // حفظ الذاكرة
-
         res.json({ response: botResponse });
     } catch (error) {
         console.error('Error:', error.response ? error.response.data : error.message);
