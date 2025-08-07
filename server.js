@@ -6,38 +6,57 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000; // التعديل المهم هنا ليعمل على Render
 const upload = multer({ dest: 'uploads/' });
 
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY || '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';
+// تأكد من تعيين المتغير البيئي في إعدادات Render
+const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
 
+// Middleware للتعامل مع الملفات
+app.use('/uploads', express.static('uploads'));
+
+// نقطة النهاية للدردشة مع دعم الملفات
 app.post('/chat', upload.single('file'), async (req, res) => {
-    const { message } = req.body;
-    const file = req.file;
-
     try {
+        const { message } = req.body;
+        const file = req.file;
+
+        if (!PERPLEXITY_API_KEY) {
+            return res.status(500).json({ error: 'API key not configured' });
+        }
+
         let prompt = message || "Analyze the attached file";
         
-        // If file is uploaded, read its content
         if (file) {
             const filePath = path.join(__dirname, file.path);
-            const fileContent = fs.readFileSync(filePath, 'utf-8');
-            prompt += `\n\nFile Content (${file.originalname}):\n${fileContent}`;
+            let fileContent;
             
-            // Clean up the file after reading
-            fs.unlinkSync(filePath);
+            try {
+                fileContent = fs.readFileSync(filePath, 'utf-8');
+                prompt += `\n\nFile Content (${file.originalname || file.filename}):\n${fileContent}`;
+            } catch (readError) {
+                console.error('Error reading file:', readError);
+                return res.status(500).json({ error: 'Error reading file content' });
+            } finally {
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+            }
         }
 
         const response = await axios.post(
             'https://api.perplexity.ai/chat/completions',
             {
-                model: 'sonar-pro',
+                model: 'sonar-small-chat',
                 messages: [
-                    { role: 'system', content: 'Be precise and concise in your responses. Analyze any provided files carefully.' },
+                    { 
+                        role: 'system', 
+                        content: 'You are an AI assistant. Be precise and concise in your responses.' 
+                    },
                     { role: 'user', content: prompt }
                 ],
                 max_tokens: 1024,
@@ -46,20 +65,35 @@ app.post('/chat', upload.single('file'), async (req, res) => {
             {
                 headers: {
                     'Authorization': `Bearer ${PERPLEXITY_API_KEY}`,
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
+                    'Content-Type': 'application/json'
+                },
+                timeout: 10000 // 10 ثانية timeout
             }
         );
         
-        const botResponse = response.data.choices[0].message.content;
-        res.json({ response: botResponse });
+        res.json({ response: response.data.choices[0].message.content });
     } catch (error) {
-        console.error('Error:', error.response ? error.response.data : error.message);
-        res.status(500).json({ error: 'Failed to get response from Perplexity API' });
+        console.error('API Error:', error.message);
+        if (error.response) {
+            console.error('Response Data:', error.response.data);
+            console.error('Response Status:', error.response.status);
+        }
+        res.status(500).json({ 
+            error: 'Failed to get AI response',
+            details: error.message 
+        });
     }
 });
 
+// نقطة نهاية للتحقق من صحة الخادم
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'healthy' });
+});
+
+// بدء الخادم
 app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+    console.log(`Server running on port ${port}`);
+    if (!PERPLEXITY_API_KEY) {
+        console.warn('Warning: PERPLEXITY_API_KEY is not set!');
+    }
 });
